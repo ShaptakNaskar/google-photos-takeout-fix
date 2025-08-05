@@ -9,7 +9,9 @@ This tool helps clean up and restore metadata for media files exported from **Go
 - Embeds metadata (timestamp, GPS, etc.) into media files using [ExifTool](https://exiftool.org/)
 - Works recursively across all subfolders
 - Supports common photo and video formats
-
+- Smart fallback metadata embedding (in standard version)
+- Simplified no-fallback version also available
+  
 ---
 
 ## 🛠 Requirements
@@ -28,12 +30,16 @@ This script uses `python-magic-bin`, so there's **no need for Unix tools like `f
 ## 🚀 Usage
 
 1. Extract your **Google Photos Takeout** ZIP/TGZ file.
-2. Place `fix_and_embed_windows.py` inside the extracted folder.
+2. Place `fix_and_embed_windows.py` or `lite.fix_and_embed_windows` inside the extracted folder.
 3. Open a terminal or PowerShell in that folder.
 4. Run the script:
 
 ```bash
 python fix_and_embed_windows.py
+```
+or
+```bash
+python lite.fix_and_embed_windows
 ```
 
 The script will:
@@ -62,11 +68,24 @@ The script will:
 
 ---
 
+## 🧠 Variant Comparison
+
+| Feature                                | `fix_and_embed_windows.py` | `fix_and_embed_windows_lite.py` |
+| -------------------------------------- | -------------------------- | ------------------------------- |
+| Smart fallback metadata embedding      | ✅ Yes (3-step retry)       | ❌ No (fails fast)               |
+| Logs failed files                      | ✅ Yes                      | ✅ Yes                           |
+| Strict → fuzzy matching for JSON files | ✅ Yes                      | ✅ Yes                           |
+| Recursive folder support               | ✅ Yes                      | ✅ Yes                           |
+| Thumbnail/preview tag stripping        | ✅ Conditionally applied    | ❌ Never applied                 |
+
+---
+
 ## ⚠️ Notes
 
 * Always **back up your files** before running the script.
 * The script will **overwrite** original media files when embedding metadata.
 * Only files with both media and matching `.supplemental-metadata.json` will be processed.
+* Poorly truncated `.json` files from Google Takeout (e.g., `sup.json`, `supple.json`) will be fuzzily matched to the closest media file when strict matching fails.
 
 ---
 
@@ -89,7 +108,9 @@ This project is licensed under the **MIT License**.
 
 ## ⚠️ Disclaimer
 
-This tool is provided **"AS IS"**, **without warranty of any kind** — either express or implied.  
-Use it **at your own risk**. The authors and contributors are **not responsible for any damage, data loss, or issues** that may arise from its use.
+This tool is provided **"AS IS"**, **without warranty or guarantee** of any kind — either express or implied.
+Use it **at your own risk**. The authors and contributors are **not responsible** for any damage, data loss, or issues that may arise from its use.
 
 You are strongly advised to **make backups** of your original files before running this script.
+
+---
