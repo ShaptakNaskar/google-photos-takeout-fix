@@ -1,6 +1,7 @@
 import os
 import subprocess
 import magic  # Requires python-magic-bin on Windows
+import difflib
 
 # Mapping MIME types to correct extensions
 MIME_EXTENSION_MAP = {
@@ -14,23 +15,47 @@ MIME_EXTENSION_MAP = {
     "image/x-sony-arw": ".arw",
     "image/x-panasonic-raw": ".rw2",
     "video/x-msvideo": ".avi",
-    # Add more as needed
 }
 
 def get_mime_type(filepath):
     try:
-        mime = magic.from_file(filepath, mime=True)
-        return mime
+        return magic.from_file(filepath, mime=True)
     except Exception as e:
         print(f"❌ Error reading MIME type for {filepath}: {e}")
         return None
+
+def find_best_json_match(media_file, all_jsons):
+    media_name = os.path.basename(media_file)
+    media_stem, _ = os.path.splitext(media_name)
+
+    # 1. Strict match
+    for json_path in all_jsons:
+        json_base = os.path.basename(json_path)
+        if json_base == media_name + ".supplemental-metadata.json":
+            return json_path
+        if json_base.startswith(media_name) or json_base.startswith(media_stem):
+            return json_path
+
+    # 2. Fuzzy fallback
+    candidates = [j for j in all_jsons if j.lower().endswith(".json")]
+    if not candidates:
+        return None
+
+    matches = difflib.get_close_matches(media_name, [os.path.basename(j) for j in candidates], n=1, cutoff=0.6)
+    if matches:
+        for json_path in candidates:
+            if os.path.basename(json_path) == matches[0]:
+                print(f"🧠 Fallback matched '{media_name}' to '{matches[0]}'")
+                return json_path
+
+    return None
 
 def fix_extensions_and_json(root):
     renamed_files = {}
     for dirpath, _, filenames in os.walk(root):
         for name in filenames:
             if name.endswith(".supplemental-metadata.json"):
-                continue  # Skip metadata files
+                continue
 
             full_path = os.path.join(dirpath, name)
             if not os.path.isfile(full_path):
@@ -43,11 +68,10 @@ def fix_extensions_and_json(root):
                 if current_ext.lower() != correct_ext:
                     new_name = base + correct_ext
                     new_path = os.path.join(dirpath, new_name)
-                    if not os.path.exists(new_path):  # avoid overwriting
+                    if not os.path.exists(new_path):
                         os.rename(full_path, new_path)
                         print(f"🔄 Renamed media: {name} → {new_name}")
 
-                        # Rename the corresponding JSON metadata file if it exists
                         json_old = os.path.join(dirpath, name + ".supplemental-metadata.json")
                         json_new = new_name + ".supplemental-metadata.json"
                         json_new_path = os.path.join(dirpath, json_new)
@@ -68,29 +92,22 @@ def embed_metadata_with_fallback(json_path, media_path):
 
     print(f"\n📎 Embedding metadata into: {media_path}")
 
-    # 1. First attempt — no stripping
-    args_base = [
-        "-m", "-overwrite_original",
-        f"-json={json_path}", media_path
-    ]
+    # Attempt 1
+    args_base = ["-m", "-overwrite_original", f"-json={json_path}", media_path]
     result = run_exiftool(args_base)
     if succeeded(result):
         print("✅ Metadata embedded successfully (no stripping)")
         return True
 
-    # 2. Second attempt — strip thumbnail only
+    # Attempt 2
     print("⚠️ Failed. Retrying with thumbnail removed...")
-    args_thumb = [
-        "-m", "-overwrite_original",
-        "-thumbnailimage=",
-        f"-json={json_path}", media_path
-    ]
+    args_thumb = ["-m", "-overwrite_original", "-thumbnailimage=", f"-json={json_path}", media_path]
     result = run_exiftool(args_thumb)
     if succeeded(result):
         print("✅ Metadata embedded after stripping thumbnail")
         return True
 
-    # 3. Third attempt — strip only OtherImage* tags
+    # Attempt 3
     print("⚠️ Still failed. Retrying with preview pointers removed...")
     args_other = [
         "-m", "-overwrite_original",
@@ -102,7 +119,7 @@ def embed_metadata_with_fallback(json_path, media_path):
         print("✅ Metadata embedded after removing preview tags")
         return True
 
-    # ❌ All attempts failed
+    # Failed all
     print("❌ All metadata embed attempts failed")
     with open("failed_metadata_log.txt", "a", encoding="utf-8") as log:
         log.write(f"{media_path}\n")
@@ -110,14 +127,15 @@ def embed_metadata_with_fallback(json_path, media_path):
 
 def embed_metadata(root):
     for dirpath, _, filenames in os.walk(root):
-        for name in filenames:
-            if name.endswith(".supplemental-metadata.json"):
-                json_path = os.path.join(dirpath, name)
-                media_path = json_path.replace(".supplemental-metadata.json", "")
-                if os.path.exists(media_path):
-                    embed_metadata_with_fallback(json_path, media_path)
-                else:
-                    print(f"⚠️ Media file not found for: {json_path}")
+        jsons = [os.path.join(dirpath, f) for f in filenames if f.lower().endswith(".json")]
+        medias = [os.path.join(dirpath, f) for f in filenames if not f.lower().endswith(".json")]
+
+        for media_path in medias:
+            json_path = find_best_json_match(media_path, jsons)
+            if json_path and os.path.exists(json_path):
+                embed_metadata_with_fallback(json_path, media_path)
+            else:
+                print(f"⚠️ No metadata found for: {media_path}")
 
 if __name__ == "__main__":
     root_folder = "."  # Change to your target folder
